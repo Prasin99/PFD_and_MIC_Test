@@ -92,64 +92,49 @@ export function useInputAxes(initialThrottle = 0.5) {
     const pad = Array.from(pads).find((p) => p && p.connected);
 
     if (pad) {
-      const DZ = 0.08;
-      const dz = (v) => (Math.abs(v) < DZ ? 0 : v);
+  const DZ = 0.08;
+  const dz = (v) => (Math.abs(v) < DZ ? 0 : v);
 
-      // Main stick
-      gpRoll  =  dz(pad.axes[0] ?? 0);
-      gpPitch = -dz(pad.axes[1] ?? 0); // pull back = positive climb
+  // Logitech Extreme 3D Pro axis layout (and most similar HOTAS):
+  //   axis 0 — stick X (roll → heading)
+  //   axis 1 — stick Y (pitch → altitude, negated so pull-back = climb)
+  //   axis 6 — throttle slider on the base
+  gpRoll  =  dz(pad.axes[0] ?? 0);
+  //gpPitch = -dz(pad.axes[1] ?? 0);
+  gpPitch = dz(pad.axes[1] ?? 0); // pull back = climb (Logitech 3D Pro: axis 1 +ve when pulled back)
 
-      gpActivePitch = gpPitch !== 0;
-      gpActiveRoll  = gpRoll  !== 0;
+  gpActivePitch = gpPitch !== 0;
+  gpActiveRoll  = gpRoll  !== 0;
 
-      if (pad.mapping === 'standard') {
-        // Standard controller: analog triggers
-        const rt = pad.buttons[7]?.value ?? 0;
-        const lt = pad.buttons[6]?.value ?? 0;
-        gpThrDelta += (rt - lt) * dt * 0.5;
-
-        // Extra digital fallback: shoulder buttons
-        const rb = pad.buttons[5]?.pressed ? 1 : 0;
-        const lb = pad.buttons[4]?.pressed ? 1 : 0;
-        gpThrDelta += (rb - lb) * dt * 0.35;
-
-        // D-pad up / down as throttle nudge (handy on game controllers)
-        const dpadUp   = pad.buttons[12]?.pressed ? 1 : 0;
-        const dpadDown = pad.buttons[13]?.pressed ? 1 : 0;
-        gpThrDelta += (dpadUp - dpadDown) * dt * 0.35;
-      } else {
-        // HOTAS / flight stick
-        if (typeof pad.axes[3] === 'number') {
-          const raw = pad.axes[3];
-          const sl = sliderRef.current;
-
-          if (!sl.initialised) {
-            sl.last = raw;
-            sl.initialised = true;
-          } else if (Math.abs(raw - sl.last) > 0.02) {
-            sl.active = true;
-            sl.last = raw;
-          }
-
-          // If the physical throttle slider has been actively moved,
-          // use it as absolute throttle.
-          if (sl.active) {
-            gpAbsThrottle = clamp01((1 - raw) / 2);
-          }
-        }
-
-        // HOTAS button fallback for thrust up / down
-        const btnUp =
-          (pad.buttons[5]?.pressed ? 1 : 0) ||
-          (pad.buttons[7]?.pressed ? 1 : 0);
-
-        const btnDown =
-          (pad.buttons[4]?.pressed ? 1 : 0) ||
-          (pad.buttons[6]?.pressed ? 1 : 0);
-
-        gpThrDelta += (btnUp - btnDown) * dt * 0.35;
-      }
+  // Throttle slider on axis 6.
+  //   raw = -1 (slider pushed all the way forward / "up") → throttle = 1
+  //   raw = +1 (slider pulled all the way back / "down")  → throttle = 0
+  // If your hardware reports the opposite direction, flip to `(raw + 1) / 2`.
+  if (typeof pad.axes[6] === 'number') {
+    const raw = pad.axes[6];
+    const sl = sliderRef.current;
+    if (!sl.initialised) {
+      sl.last = raw;
+      sl.initialised = true;
+    } else if (Math.abs(raw - sl.last) > 0.02) {
+      sl.active = true;
+      sl.last = raw;
     }
+    if (sl.active) {
+      gpAbsThrottle = clamp01((1 - raw) / 2);
+    }
+  }
+
+  // Trigger / shoulder buttons as a small extra throttle nudge
+  // (handy for fine adjustments without moving the slider)
+  const btnUp =
+    (pad.buttons[5]?.pressed ? 1 : 0) ||
+    (pad.buttons[7]?.pressed ? 1 : 0);
+  const btnDown =
+    (pad.buttons[4]?.pressed ? 1 : 0) ||
+    (pad.buttons[6]?.pressed ? 1 : 0);
+  gpThrDelta += (btnUp - btnDown) * dt * 0.35;
+}
 
     // ── Combine pitch / roll: joystick PRIORITY ─────────────────────────────
     // If the stick is moved (outside the deadzone) on a channel, it wins;

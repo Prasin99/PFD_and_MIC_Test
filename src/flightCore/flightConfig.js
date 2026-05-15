@@ -76,7 +76,7 @@ export function buildFlightConfig(difficulty = 'medium', overrides = {}) {
     altitude: {
       initial: 8000,
       target: 8000,
-      gainPitch: 80,
+      gainPitch: 120,
       rateLag: 1.2,
       disturbanceSigma: d.altDisturbSigma,
       disturbanceTau: 20,
@@ -125,7 +125,9 @@ export function buildFlightConfig(difficulty = 'medium', overrides = {}) {
       maxThrottleSpeed: 200,
       initialThrottle: 0.5,
       rateLag: 2.0,
-      pitchDragGain: 10,
+      //pitchDragGain: 10,
+      altRateCouplingGain: 0.3,   // kt of speed shift per ft/sec of vSpeed
+                            // climb bleeds airspeed, descent builds it
       disturbanceSigma: d.spdDisturbSigma,
       disturbanceTau: 8,
       tolerance: { green: 3, yellow: 7 },

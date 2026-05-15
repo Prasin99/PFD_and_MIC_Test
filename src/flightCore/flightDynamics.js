@@ -79,16 +79,28 @@ export function stepFlight(state, inputs, mode, cfg, dt, rng) {
   if (spdInactive) {
     state.speed = state.currentTargetSpeed;
   } else {
-    const baseEq = cfg.speed.minThrottleSpeed + (cfg.speed.maxThrottleSpeed - cfg.speed.minThrottleSpeed) * state.throttle;
-    // Pitch-induced drag: any pitch deflection (up OR down) bleeds speed,
-    // forcing the trainee to manage throttle alongside pitch.
-    const pitchDrag = altInactive
-      ? 0
-      : (cfg.speed.pitchDragGain ?? 0) * Math.abs(clampPM1(inputs.pitch));
-    const eq = baseEq - pitchDrag;
-    const speedCmd = eq + state.distSpeed;
-    state.speed += (speedCmd - state.speed) * (dt / cfg.speed.rateLag);
-  }
+  // 1. Throttle sets the equilibrium airspeed.
+  //    throttle=0  → minThrottleSpeed (e.g. 100 kt)
+  //    throttle=1  → maxThrottleSpeed (e.g. 200 kt)
+  //    throttle=0.5→ midpoint (150 kt)
+  const baseEq = cfg.speed.minThrottleSpeed
+               + (cfg.speed.maxThrottleSpeed - cfg.speed.minThrottleSpeed) * state.throttle;
+
+  // 2. Energy trade with altitude (signed, realistic aviation physics):
+  //    climbing  (vSpeed > 0) → kinetic energy → potential energy → speed drops
+  //    descending(vSpeed < 0) → potential energy → kinetic energy → speed rises
+  //    Gain = kt of equilibrium-speed shift per ft/sec of vertical rate.
+  //    With vSpeed up to ±10 ft/sec at moderate pitch and gain ≈ 0.8,
+  //    a steady climb costs ≈ 8 kt — enough to require throttle correction.
+  const altRateGain = cfg.speed.altRateCouplingGain ?? 0.8;
+  const altCoupling = altInactive ? 0 : altRateGain * state.vSpeed;
+
+  const eq = baseEq - altCoupling;
+
+  // 3. Disturbance + first-order lag toward equilibrium.
+  const speedCmd = eq + state.distSpeed;
+  state.speed += (speedCmd - state.speed) * (dt / cfg.speed.rateLag);
+}
 }
 
 function updateTarget(channelName, modeStr, currentTarget, ccfg, state, dt, rng) {

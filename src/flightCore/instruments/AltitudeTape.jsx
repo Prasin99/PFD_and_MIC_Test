@@ -32,7 +32,8 @@ export function AltitudeTape({
 }) {
   const scale = height / (2 * tapeSpan);          // px per unit
   // Render a generous tick band so even far-away targets keep ticks visible.
-  const renderRange = 1500;
+  //const renderRange = 1500;
+  const renderRange = 5000;   // was 1500 — keeps ticks visible even on big excursions
   const totalHeight = renderRange * 2 * scale;
 
   // STABLE anchor captured on first render. The tick `useMemo` previously

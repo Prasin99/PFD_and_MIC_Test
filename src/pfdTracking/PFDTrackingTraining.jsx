@@ -217,9 +217,9 @@ export function PFDTrackingTraining({ settings = {}, onComplete = () => {}, onEx
               outOfTolerance={isFlying && hdgActive && outOfTol.hdg}
               label={t('heading')}
             />
-            <div className="mt-4 min-h-[40px]">
-              <ToleranceMessage messages={messages} />
-            </div>
+            <div className="mt-4 h-[80px]">
+  <ToleranceMessage messages={messages} />
+</div>
           </div>
 
           <div className="flex items-start gap-3">
