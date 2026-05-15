@@ -40,6 +40,9 @@ export function PFDTrackingSummary({ result, onTryAgain, onDone }) {
             const wG = (r.timeInGreen  / total) * 100;
             const wY = (r.timeInYellow / total) * 100;
             const wR = (r.timeInRed    / total) * 100;
+            const pctG = Math.round(wG);
+const pctY = Math.round(wY);   // ← new
+const pctR = Math.round(wR);   // ← new
             const unit = c === 'altitude' ? 'ft' : c === 'speed' ? 'kt' : '°';
 
             return (
@@ -56,10 +59,10 @@ export function PFDTrackingSummary({ result, onTryAgain, onDone }) {
                   <div style={{ width: `${wR}%`, background: '#ef4444' }} />
                 </div>
                 <div className="mt-2 flex gap-4 text-xs text-gray-600">
-                  <span><span className="inline-block w-2 h-2 bg-green-500 mr-1" />Green {tg}s ({pct}%)</span>
-                  <span><span className="inline-block w-2 h-2 bg-amber-400 mr-1" />Yellow {ty}s</span>
-                  <span><span className="inline-block w-2 h-2 bg-red-500 mr-1" />Red {tr}s</span>
-                </div>
+  <span><span className="inline-block w-2 h-2 bg-green-500 mr-1" />Green {tg}s ({pctG}%)</span>
+  <span><span className="inline-block w-2 h-2 bg-amber-400 mr-1" />Yellow {ty}s ({pctY}%)</span>
+  <span><span className="inline-block w-2 h-2 bg-red-500 mr-1" />Red {tr}s ({pctR}%)</span>
+</div>
               </div>
             );
           })}

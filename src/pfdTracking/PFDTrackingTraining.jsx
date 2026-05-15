@@ -13,25 +13,26 @@ import { SessionHeader } from '../flightCore/instruments/SessionHeader.jsx';
 import { AircraftSymbol } from '../flightCore/instruments/AircraftSymbol.jsx';
 import { ToleranceMessage } from '../flightCore/instruments/ToleranceMessage.jsx';
 import { BriefingModal } from '../flightCore/instruments/BriefingModal.jsx';
+//import { defaultLegs } from './legs.js';
 import { buildDifficultyLegs } from './legs.js';
 
 export function PFDTrackingTraining({ settings = {}, onComplete = () => {}, onExit = () => {} }) {
   const {
-    duration = 240,
-    difficulty = 'medium',
-    enableAltitude = true,
-    enableHeading = true,
-    enableSpeed = true,
-    locale = 'en',
-    legs = null,
-  } = settings;
+  duration = 240,
+  difficulty = 'medium',
+  enableAltitude = true,
+  enableHeading = true,
+  enableSpeed = true,
+  locale = 'en',
+  legs = null,
+} = settings;
 
   const cfg = useMemo(() => buildFlightConfig(difficulty), [difficulty]);
   const activeLegs = useMemo(() => {
-    if (Array.isArray(legs) && legs.length > 0) return legs;
-    const difficultyLegs = buildDifficultyLegs(duration);
-    return difficultyLegs[difficulty] ?? difficultyLegs.medium;
-  }, [legs, difficulty, duration]);
+  if (Array.isArray(legs) && legs.length > 0) return legs;
+  const difficultyLegs = buildDifficultyLegs(duration);
+  return difficultyLegs[difficulty] ?? difficultyLegs.medium;
+}, [legs, difficulty, duration]);
 
   const stateRef = useRef(null);
   const elapsedRef = useRef(0);
@@ -64,9 +65,6 @@ export function PFDTrackingTraining({ settings = {}, onComplete = () => {}, onEx
 
   const { poll, setThrottle } = useInputAxes(cfg.speed.initialThrottle);
 
-  // Effective mode for the current leg: enableX prop can force a channel
-  // inactive even if the leg has it active. Useful for LMS configs that
-  // strip channels for a specific course.
   const effectiveMode = useCallback((legMode) => ({
     altitude: enableAltitude ? legMode.altitude : 'inactive',
     heading:  enableHeading  ? legMode.heading  : 'inactive',
@@ -75,13 +73,37 @@ export function PFDTrackingTraining({ settings = {}, onComplete = () => {}, onEx
 
   useFlightLoop((dt) => {
     if (!stateRef.current || !trackerRef.current) return;
-    const inputs = poll(dt);
 
+    // ── 1. Time's up? End the session before anything else. ──────────
+    // Done first so the wrap-around frame (elapsed >= totalLeg) ends the
+    // session cleanly instead of triggering another "Next leg" briefing.
+    if (elapsedRef.current >= duration) {
+      runningRef.current = false;
+      setPhase('done');
+      return;
+    }
+
+    // ── 2. Which leg are we in? ──────────────────────────────────────
+    // Clamp `safeElapsed` just under the total so `legAt` always returns
+    // the last leg on the final frame instead of wrapping around to 0.
     const totalLeg = totalLegsDuration(activeLegs) || 1;
-    const wrapped = elapsedRef.current % totalLeg;
-    const { index: legIdx, leg } = legAt(activeLegs, wrapped);
-    const mode = effectiveMode(leg.mode);
+    const safeElapsed = Math.min(elapsedRef.current, totalLeg - 1e-6);
+    const { index: legIdx, leg } = legAt(activeLegs, safeElapsed);
 
+    // ── 3. Moved into a new leg? Pause and show the briefing for it. ─
+    // Done BEFORE stepFlight so the new leg's mode doesn't run for one
+    // physics frame before the trainee sees the briefing.
+    if (legIdx !== currentLegIdxRef.current) {
+      currentLegIdxRef.current = legIdx;
+      runningRef.current = false;
+      setActiveLegIdx(legIdx);
+      setPhase('briefing');
+      return;
+    }
+
+    // ── 4. Step physics for the current leg. ─────────────────────────
+    const mode   = effectiveMode(leg.mode);
+    const inputs = poll(dt);
     stepFlight(stateRef.current, inputs, mode, cfg, dt, Math.random);
     elapsedRef.current += dt;
 
@@ -90,38 +112,26 @@ export function PFDTrackingTraining({ settings = {}, onComplete = () => {}, onEx
     if (mode.heading  !== 'inactive') trackerRef.current.record('heading',  s.heading,  s.currentTargetHeading,  dt);
     if (mode.speed    !== 'inactive') trackerRef.current.record('speed',    s.speed,    s.currentTargetSpeed,    dt);
 
-    if (legIdx !== currentLegIdxRef.current) {
-      currentLegIdxRef.current = legIdx;
-      runningRef.current = false;
-      setActiveLegIdx(legIdx);
-      setPhase('briefing');
-      return;
-    }
-setDisplay({
-      altitude: s.altitude, heading: s.heading, speed: s.speed,
-      throttle: s.throttle,
-      targetAltitude: s.currentTargetAltitude,
-      targetHeading: s.currentTargetHeading,
-      targetSpeed: s.currentTargetSpeed,
-      elapsedSec: elapsedRef.current,
-    });
+    tickAccumRef.current += dt;
+    if (tickAccumRef.current >= 1 / 30) {
+      tickAccumRef.current = 0;
+      setDisplay({
+        altitude: s.altitude, heading: s.heading, speed: s.speed,
+        throttle: s.throttle,
+        targetAltitude: s.currentTargetAltitude,
+        targetHeading: s.currentTargetHeading,
+        targetSpeed: s.currentTargetSpeed,
+        elapsedSec: elapsedRef.current,
+      });
 
-    const errAlt = mode.altitude !== 'inactive' ? Math.abs(s.altitude - s.currentTargetAltitude) : 0;
-    const errHdg = mode.heading  !== 'inactive' ? Math.abs(angularDiff(s.heading, s.currentTargetHeading)) : 0;
-    const errSpd = mode.speed    !== 'inactive' ? Math.abs(s.speed - s.currentTargetSpeed) : 0;
-    const newOut = {
-      alt: errAlt > cfg.altitude.tolerance.green,
-      hdg: errHdg > cfg.heading.tolerance.green,
-      spd: errSpd > cfg.speed.tolerance.green,
-    };
-    setOutOfTol((prev) =>
-      prev.alt === newOut.alt && prev.hdg === newOut.hdg && prev.spd === newOut.spd
-        ? prev : newOut
-    );
-
-    if (elapsedRef.current >= duration) {
-      runningRef.current = false;
-      setPhase('done');
+      const errAlt = mode.altitude !== 'inactive' ? Math.abs(s.altitude - s.currentTargetAltitude) : 0;
+      const errHdg = mode.heading  !== 'inactive' ? Math.abs(angularDiff(s.heading, s.currentTargetHeading)) : 0;
+      const errSpd = mode.speed    !== 'inactive' ? Math.abs(s.speed - s.currentTargetSpeed) : 0;
+      setOutOfTol({
+        alt: errAlt > cfg.altitude.tolerance.green,
+        hdg: errHdg > cfg.heading.tolerance.green,
+        spd: errSpd > cfg.speed.tolerance.green,
+      });
     }
   }, runningRef);
 
@@ -207,9 +217,9 @@ setDisplay({
               outOfTolerance={isFlying && hdgActive && outOfTol.hdg}
               label={t('heading')}
             />
-            <div className="mt-4 h-[80px]">
-  <ToleranceMessage messages={messages} />
-</div>
+            <div className="mt-4 min-h-[40px]">
+              <ToleranceMessage messages={messages} />
+            </div>
           </div>
 
           <div className="flex items-start gap-3">
@@ -240,9 +250,7 @@ setDisplay({
         <BriefingModal
           title={locale === 'de' ? 'Nächster Abschnitt' : 'Next leg'}
           lines={currentLeg.briefing[locale] ?? currentLeg.briefing.en}
-          hint={locale === 'de'
-            ? 'Leertaste / Joystick-Taste zum Fortfahren'
-            : 'Press SPACE or any joystick button to continue'}
+          hint={locale === 'de' ? 'Leertaste zum Fortfahren' : 'Press SPACE to continue'}
           onDismiss={handleBriefingDismiss}
         />
       )}
@@ -257,8 +265,8 @@ setDisplay({
 
       <div className="px-6 py-2 text-xs text-gray-500 border-t border-gray-200 bg-white">
         {locale === 'de'
-          ? '🕹 Joystick (Priorität) · ⌨ ↑↓ Höhe · ←→ Kurs · Q / A Schub'
-          : '🕹 Joystick (priority) · ⌨ ↑↓ altitude · ←→ heading · Q / A throttle'}
+          ? '↑ ↓ Höhe   ←→ Kurs   Q / A  Schub   (Joystick wird automatisch erkannt)'
+          : '↑ ↓ pitch (altitude)   ← → roll (heading)   Q / A  throttle   (joystick auto-detected)'}
       </div>
     </div>
   );
@@ -267,15 +275,15 @@ setDisplay({
 const MESSAGES = {
   en: {
     altitude: 'ALTITUDE', heading: 'HEADING', speed: 'SPEED',
-    altOff: 'Altimeter outside its tolerance',
-    hdgOff: 'Compass outside its tolerance',
-    spdOff: 'Airspeed indicator outside its tolerance',
+    altOff: 'Altitude out of tolerance',
+    hdgOff: 'Heading out of tolerance',
+    spdOff: 'Speed out of tolerance',
   },
   de: {
     altitude: 'HÖHE', heading: 'KURS', speed: 'GESCHW.',
-    altOff: 'Höhenmesser außerhalb der Toleranz',
-    hdgOff: 'Kompass außerhalb der Toleranz',
-    spdOff: 'Fahrtmesser außerhalb der Toleranz',
+    altOff: 'Höhe außerhalb der Toleranz',
+    hdgOff: 'Kurs außerhalb der Toleranz',
+    spdOff: 'Geschwindigkeit außerhalb der Toleranz',
   },
 };
 

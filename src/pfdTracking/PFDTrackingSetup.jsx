@@ -236,11 +236,12 @@ export function PFDTrackingSetup({ onStart, defaults = {} }) {
       if (!checkedLevels.has(lvl.id)) continue;
       if (order.indexOf(lvl.group) > order.indexOf(difficulty)) difficulty = lvl.group;
     }
-    const cfgDifficulty = difficulty === 'expert' ? 'hard' : difficulty;
+    // Pass the session difficulty straight through. `flightConfig.js` now
+    // has an `expert` preset so we no longer need to remap it to `hard`.
     onStart({
       legs,
       duration: totalSec,
-      difficulty: cfgDifficulty,
+      difficulty,
       enableAltitude,
       enableHeading,
       enableSpeed,
@@ -281,10 +282,10 @@ export function PFDTrackingSetup({ onStart, defaults = {} }) {
             <span className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${
               isOff ? 'bg-slate-300' : 'bg-emerald-500'
             }`} />
-            <span className={`text-base font-semibold ${
+            <span className={`text-sm font-semibold ${
               isOff ? 'text-slate-500' : 'text-slate-800'
             }`}>{t(labelKey)}</span>
-            <span className={`text-xs font-mono uppercase tracking-wide px-1.5 py-0.5 rounded ${pillCls}`}>
+            <span className={`text-[10px] font-mono uppercase tracking-wide px-1.5 py-0.5 rounded ${pillCls}`}>
               {statusLabel}
             </span>
           </div>
@@ -292,7 +293,7 @@ export function PFDTrackingSetup({ onStart, defaults = {} }) {
             type="button"
             onClick={() => setEnabled(!enabled)}
             title={enabled ? t('overrideOn') : t('overrideOff')}
-            className={`text-sm px-2 py-0.5 rounded border transition ${
+            className={`text-xs px-2 py-0.5 rounded border transition ${
               enabled
                 ? 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
                 : 'bg-slate-700 border-slate-700 text-white hover:bg-slate-800'
@@ -301,7 +302,7 @@ export function PFDTrackingSetup({ onStart, defaults = {} }) {
             {enabled ? 'on' : 'off'}
           </button>
         </div>
-        <div className="text-sm text-slate-600 leading-snug pl-4">
+        <div className="text-xs text-slate-600 leading-snug pl-4">
           {t(descKey)}
         </div>
         <div className="text-[11px] text-slate-400 pl-4 mt-1 font-mono">
@@ -316,8 +317,8 @@ export function PFDTrackingSetup({ onStart, defaults = {} }) {
     <div className="min-h-screen flex bg-gray-50 p-6">
       <div className="bg-white rounded-lg shadow border border-gray-200 w-full max-w-[1600px] mx-auto p-10 flex flex-col">
         <div className="mb-8">
-          <h1 className="text-4xl font-semibold text-gray-900">{t('title')}</h1>
-          <p className="text-base text-gray-500 mt-1">{t('blurb')}</p>
+          <h1 className="text-3xl font-semibold text-gray-900">{t('title')}</h1>
+          <p className="text-sm text-gray-500 mt-1">{t('blurb')}</p>
         </div>
 
         {/* Two-column landscape layout. On narrow screens it falls back to a
@@ -328,7 +329,7 @@ export function PFDTrackingSetup({ onStart, defaults = {} }) {
           <div>
             {/* PRESETS */}
             <section className="mb-5">
-              <h2 className="text-base font-semibold text-gray-700 mb-2">{t('presets')}</h2>
+              <h2 className="text-sm font-semibold text-gray-700 mb-2">{t('presets')}</h2>
               <div className="flex flex-wrap gap-2">
                 {['all', ...PRESETS].map((p) => {
                   const active = selectedPreset === p;
@@ -336,7 +337,7 @@ export function PFDTrackingSetup({ onStart, defaults = {} }) {
                     <button
                       key={p}
                       onClick={() => pickPreset(p)}
-                      className={`px-4 py-2 rounded-full text-base border transition ${
+                      className={`px-4 py-2 rounded-full text-sm border transition ${
                         active
                           ? 'bg-blue-100 text-blue-900 border-blue-300 font-medium'
                           : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
@@ -353,11 +354,11 @@ export function PFDTrackingSetup({ onStart, defaults = {} }) {
             {/* LEVELS */}
             <section className="mb-5">
               <div className="flex items-center justify-between mb-2">
-                <h2 className="text-base font-semibold text-gray-700">{t('levels')}</h2>
+                <h2 className="text-sm font-semibold text-gray-700">{t('levels')}</h2>
                 <button
                   type="button"
                   onClick={toggleAllVisible}
-                  className="text-sm text-blue-600 hover:text-blue-800 underline-offset-2 hover:underline"
+                  className="text-xs text-blue-600 hover:text-blue-800 underline-offset-2 hover:underline"
                 >
                   {allVisibleChecked ? t('selectNone') : t('selectAll')}
                 </button>
@@ -378,10 +379,10 @@ export function PFDTrackingSetup({ onStart, defaults = {} }) {
                           checked={checked}
                           onChange={() => toggleLevel(lvl.id)}
                         />
-                        <span className="text-base font-mono font-semibold text-gray-700 w-6 flex-shrink-0">
+                        <span className="text-sm font-mono font-semibold text-gray-700 w-6 flex-shrink-0">
                           {lvl.id}
                         </span>
-                        <span className="text-base text-gray-800">
+                        <span className="text-sm text-gray-800">
                           {lvl.label[locale] ?? lvl.label.en}
                         </span>
                       </label>
@@ -390,18 +391,18 @@ export function PFDTrackingSetup({ onStart, defaults = {} }) {
                 })}
               </ul>
               {!canStart && (
-                <p className="mt-2 text-sm text-red-600">{t('chooseLevel')}</p>
+                <p className="mt-2 text-xs text-red-600">{t('chooseLevel')}</p>
               )}
             </section>
 
             {/* SECONDS PER LEVEL */}
             <section>
               <div className="flex items-center justify-between mb-1">
-                <label className="text-base font-medium text-gray-700">
+                <label className="text-sm font-medium text-gray-700">
                   {t('secondsLevel')}:{' '}
                   <span className="font-mono font-semibold text-gray-900">{secondsPerLevel}</span>
                 </label>
-                <span className="text-sm text-gray-500">
+                <span className="text-xs text-gray-500">
                   {canStart && t('sessionLen', {
                     n: checkedCount,
                     plural: locale === 'en' && checkedCount !== 1 ? 's' : '',
@@ -426,8 +427,8 @@ export function PFDTrackingSetup({ onStart, defaults = {} }) {
           <div className="space-y-5">
 
             <section>
-              <h2 className="text-base font-semibold text-gray-700">{t('activeChannels')}</h2>
-              <p className="text-sm text-gray-500 mb-2">{t('activeChDescr')}</p>
+              <h2 className="text-sm font-semibold text-gray-700">{t('activeChannels')}</h2>
+              <p className="text-xs text-gray-500 mb-2">{t('activeChDescr')}</p>
               <div className="space-y-2">
                 <ChannelRow
                   chKey="altitude" labelKey="altitude" ctlKey="altCtl"
@@ -450,7 +451,7 @@ export function PFDTrackingSetup({ onStart, defaults = {} }) {
         {/* ── BOTTOM: Start ────────────────────────────────────────── */}
         <div className="mt-8 flex justify-center">
           <button
-            className={`px-12 py-3 text-lg font-medium rounded shadow transition flex items-center gap-2 ${
+            className={`px-12 py-3 font-medium rounded shadow transition flex items-center gap-2 ${
               canStart
                 ? 'bg-blue-600 hover:bg-blue-700 text-white'
                 : 'bg-gray-200 text-gray-400 cursor-not-allowed'
