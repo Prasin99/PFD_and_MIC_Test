@@ -51,6 +51,11 @@ export function PFDTrackingTraining({ settings = {}, onComplete = () => {}, onEx
   const [phase, setPhase] = useState('briefing');
   const [activeLegIdx, setActiveLegIdx] = useState(0);
   const [outOfTol, setOutOfTol] = useState({ alt: false, hdg: false, spd: false });
+  // Per-channel tolerance level for the BLUE pin color on each tape:
+  //   'green'  → pin renders blue  (within green tolerance band — on target)
+  //   'yellow' → pin renders yellow (within yellow band — drifting)
+  //   'red'    → pin renders red   (outside yellow band — out of tolerance)
+  const [pinLevel, setPinLevel] = useState({ alt: 'green', hdg: 'green', spd: 'green' });
 
   useEffect(() => {
     stateRef.current = createFlightState(cfg);
@@ -132,6 +137,11 @@ export function PFDTrackingTraining({ settings = {}, onComplete = () => {}, onEx
         hdg: errHdg > cfg.heading.tolerance.green,
         spd: errSpd > cfg.speed.tolerance.green,
       });
+      setPinLevel({
+        alt: levelFor(errAlt, cfg.altitude.tolerance),
+        hdg: levelFor(errHdg, cfg.heading.tolerance),
+        spd: levelFor(errSpd, cfg.speed.tolerance),
+      });
     }
   }, runningRef);
 
@@ -199,6 +209,7 @@ export function PFDTrackingTraining({ settings = {}, onComplete = () => {}, onEx
             minorStep={cfg.altitude.minorStep}
             inactive={!altActive}
             outOfTolerance={isFlying && altActive && outOfTol.alt}
+            pinLevel={altActive ? pinLevel.alt : 'green'}
             label={t('altitude')}
           />
 
@@ -215,6 +226,7 @@ export function PFDTrackingTraining({ settings = {}, onComplete = () => {}, onEx
               minorStep={cfg.heading.minorStep}
               inactive={!hdgActive}
               outOfTolerance={isFlying && hdgActive && outOfTol.hdg}
+              pinLevel={hdgActive ? pinLevel.hdg : 'green'}
               label={t('heading')}
             />
             <div className="mt-4 h-[80px]">
@@ -232,6 +244,7 @@ export function PFDTrackingTraining({ settings = {}, onComplete = () => {}, onEx
               minorStep={cfg.speed.minorStep}
               inactive={!spdActive}
               outOfTolerance={isFlying && spdActive && outOfTol.spd}
+              pinLevel={spdActive ? pinLevel.spd : 'green'}
               label={t('speed')}
             />
             <div style={{ marginTop: 24 }}>
@@ -292,4 +305,17 @@ function computeOverall(summary) {
   const active = channels.filter((c) => summary[c] && summary[c].totalTime > 0.5);
   if (active.length === 0) return 0;
   return active.reduce((acc, c) => acc + summary[c].fractionGreen, 0) / active.length;
+}
+
+/**
+ * Map an absolute error against a {green, yellow} tolerance band to a
+ * three-state level used to color the blue current-value pin on each tape.
+ *   err ≤ green  → 'green'  (pin stays blue — on target)
+ *   err ≤ yellow → 'yellow' (pin turns yellow — drifting)
+ *   else         → 'red'    (pin turns red — out of tolerance)
+ */
+function levelFor(err, tol) {
+  if (err <= tol.green)  return 'green';
+  if (err <= tol.yellow) return 'yellow';
+  return 'red';
 }

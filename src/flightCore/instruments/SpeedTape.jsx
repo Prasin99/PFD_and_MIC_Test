@@ -1,12 +1,14 @@
 import React, { useMemo, useRef } from 'react';
 
 /**
- * Vertical speed tape (SkyTest PFD-style).
+ * Vertical speed tape — STATIC scale, moving pins.
  *
- * Same scrolling logic as AltitudeTape — value at viewport center, target
- * (green ring + edge arrow) scrolls with the target on the tape. Broken
- * out as a separate component because labels, units, and step sizes
- * differ.
+ * Same architecture as AltitudeTape:
+ *   - Tape scale is FIXED at anchor ± tapeSpan (anchor = first target = base).
+ *   - BLUE pin moves up/down with current value; color = tolerance state.
+ *   - GREEN target ring + ▶ arrow move up/down with the target.
+ *   - Tolerance bands move with the target.
+ *   - Off-screen chevrons appear when value or target leaves the window.
  */
 export function SpeedTape({
   value,
@@ -20,48 +22,45 @@ export function SpeedTape({
   label = 'SPEED',
   inactive = false,
   outOfTolerance = false,
+  pinLevel = 'green',
 }) {
   const scale = height / (2 * tapeSpan);
-  const renderRange = 200;
-  const totalHeight = renderRange * 2 * scale;
 
-  // STABLE anchor captured on first render — prevents per-frame re-render
-  // of all tick <div>s when target drifts. See AltitudeTape for full note.
   const anchorRef = useRef(target);
   const anchor = anchorRef.current;
 
-  const translateY = inactive
-    ? height / 2 - (anchor + renderRange - target) * scale
-    : height / 2 - (anchor + renderRange - value)  * scale;
+  const yAt = (V) => height / 2 + (anchor - V) * scale;
 
   const ticks = useMemo(() => {
     const out = [];
-    const min = anchor - renderRange;
-    const max = anchor + renderRange;
+    const min = anchor - tapeSpan;
+    const max = anchor + tapeSpan;
     for (let v = Math.ceil(min / minorStep) * minorStep; v <= max; v += minorStep) {
       const isMajor = Math.abs(v % majorStep) < 1e-6;
-      out.push({ v, y: (anchor + renderRange - v) * scale, isMajor });
+      out.push({ v, y: yAt(v), isMajor });
     }
     return out;
-  }, [anchor, renderRange, minorStep, majorStep, scale]);
+  }, [anchor, tapeSpan, minorStep, majorStep, scale]);
 
-  const yAt = (V) => (anchor + renderRange - V) * scale;
   const greenTop  = yAt(target + tolerance.green);
   const greenBot  = yAt(target - tolerance.green);
   const yellowTop = yAt(target + tolerance.yellow);
   const yellowBot = yAt(target - tolerance.yellow);
-  const targetY   = yAt(target);
 
-  const targetOffset = target - value;
-  const targetAbove  = targetOffset >  tapeSpan;
-  const targetBelow  = targetOffset < -tapeSpan;
-  const targetOff    = !inactive && (targetAbove || targetBelow);
+  const targetY = yAt(target);
+  const valueY  = inactive ? height / 2 : yAt(value);
 
-  // Target's Y in viewport coords (for the inline green ▶ arrow on the
-  // left edge of the speed tape, co-located with the green target ring).
-  const targetViewportY = inactive
-    ? height / 2
-    : height / 2 + (value - target) * scale;
+  const valueAbove  = !inactive && value  > anchor + tapeSpan;
+  const valueBelow  = !inactive && value  < anchor - tapeSpan;
+  const targetAbove = !inactive && target > anchor + tapeSpan;
+  const targetBelow = !inactive && target < anchor - tapeSpan;
+  const valueOff    = valueAbove  || valueBelow;
+  const targetOff   = targetAbove || targetBelow;
+
+  const pinColor =
+      pinLevel === 'red'    ? '#ef4444'
+    : pinLevel === 'yellow' ? '#eab308'
+    :                         '#2563eb';
 
   return (
     <div className="relative select-none" style={{ width, height: height + 40 }}>
@@ -76,77 +75,71 @@ export function SpeedTape({
         className="relative bg-white border border-gray-300 overflow-hidden"
         style={{ width, height, opacity: inactive ? 0.45 : 1 }}
       >
-        <div
-          style={{
-            position: 'absolute',
-            left: 0, right: 0, top: 0,
-            height: totalHeight,
-            transform: `translateY(${translateY}px)`,
-            willChange: 'transform',
-          }}
-        >
-          <div style={{
-            position: 'absolute', left: 30, width: 6,
-            top: yellowTop, height: yellowBot - yellowTop, background: '#fde68a',
-          }} />
-          <div style={{
-            position: 'absolute', left: 30, width: 6,
-            top: greenTop, height: greenBot - greenTop, background: '#86efac',
-          }} />
-          <div style={{
-            position: 'absolute', left: 30, width: 6,
-            top: yellowTop - 6, height: 6, background: '#ef4444',
-          }} />
-          <div style={{
-            position: 'absolute', left: 30, width: 6,
-            top: yellowBot, height: 6, background: '#ef4444',
-          }} />
+        <div style={{
+          position: 'absolute', left: 30, width: 6,
+          top: yellowTop, height: yellowBot - yellowTop, background: '#fde68a',
+        }} />
+        <div style={{
+          position: 'absolute', left: 30, width: 6,
+          top: greenTop, height: greenBot - greenTop, background: '#86efac',
+        }} />
+        <div style={{
+          position: 'absolute', left: 30, width: 6,
+          top: yellowTop - 6, height: 6, background: '#ef4444',
+        }} />
+        <div style={{
+          position: 'absolute', left: 30, width: 6,
+          top: yellowBot, height: 6, background: '#ef4444',
+        }} />
 
-          {ticks.map(({ v, y, isMajor }) => (
-            <React.Fragment key={v}>
+        {ticks.map(({ v, y, isMajor }) => (
+          <React.Fragment key={v}>
+            <div style={{
+              position: 'absolute',
+              left: isMajor ? 44 : 52,
+              width: isMajor ? width - 50 : width - 60,
+              top: y - 0.5, height: 1, background: '#374151',
+            }} />
+            {isMajor && (
               <div style={{
                 position: 'absolute',
-                left: isMajor ? 44 : 52,
-                width: isMajor ? width - 50 : width - 60,
-                top: y - 0.5, height: 1, background: '#374151',
-              }} />
-              {isMajor && (
-                <div style={{
-                  position: 'absolute',
-                  left: 0, top: y - 7, width: 28,
-                  fontSize: 11,
-                  fontFamily: 'ui-monospace, monospace',
-                  color: '#111827', textAlign: 'right',
-                }}>
-                  {v}
-                </div>
-              )}
-            </React.Fragment>
-          ))}
+                left: 0, top: y - 7, width: 28,
+                fontSize: 11,
+                fontFamily: 'ui-monospace, monospace',
+                color: '#111827', textAlign: 'right',
+              }}>
+                {v}
+              </div>
+            )}
+          </React.Fragment>
+        ))}
 
+        {!targetOff && (
           <div style={{
             position: 'absolute', left: width - 30, top: targetY - 9,
             width: 18, height: 18,
             border: '2.5px solid #16a34a',
             borderRadius: '50%',
+            zIndex: 2,
           }} />
-        </div>
+        )}
 
-        {/* Fixed-at-center blue current indicator */}
-        <div style={{
-          position: 'absolute', top: height / 2 - 3, left: width - 32,
-          width: 28, height: 6, background: '#2563eb', zIndex: 2,
-        }} />
-
-        {/* Green target arrow on the LEFT edge — co-located with target ring */}
         {!targetOff && (
           <div style={{
-            position: 'absolute', top: targetViewportY - 7, left: 0,
+            position: 'absolute', top: targetY - 7, left: 0,
             color: '#16a34a', fontSize: 14, zIndex: 3,
             lineHeight: '14px', fontWeight: 700,
           }}>
             ▶
           </div>
+        )}
+
+        {/* BLUE current-value pin — moves with value, color = tolerance */}
+        {!valueOff && (
+          <div style={{
+            position: 'absolute', top: valueY - 3, left: width - 32,
+            width: 28, height: 6, background: pinColor, zIndex: 4,
+          }} />
         )}
 
         {targetOff && (
@@ -168,6 +161,28 @@ export function SpeedTape({
             }}
           >
             {targetAbove ? '▲' : '▼'} {Math.round(target)}
+          </div>
+        )}
+
+        {valueOff && (
+          <div
+            style={{
+              position: 'absolute',
+              left: 4,
+              ...(valueAbove ? { top: 2 } : { bottom: 2 }),
+              fontSize: 11,
+              fontFamily: 'ui-monospace, monospace',
+              color: pinColor,
+              fontWeight: 700,
+              background: 'rgba(255,255,255,0.85)',
+              padding: '1px 4px',
+              borderRadius: 3,
+              zIndex: 4,
+              textAlign: 'center',
+              minWidth: 32,
+            }}
+          >
+            {valueAbove ? '▲' : '▼'} {Math.round(value)}
           </div>
         )}
 
