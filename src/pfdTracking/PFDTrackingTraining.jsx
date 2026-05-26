@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { buildFlightConfig } from '../flightCore/flightConfig.js';
+//import { buildFlightConfig } from '../flightCore/flightConfig.js';
+import { buildFlightConfig, BRIEFING_DURATION_MS } from '../flightCore/flightConfig.js';
 import { createFlightState, stepFlight, angularDiff } from '../flightCore/flightDynamics.js';
 import { useInputAxes } from '../flightCore/useInputAxes.js';
 import { useFlightLoop } from '../flightCore/useFlightLoop.js';
@@ -51,6 +52,10 @@ export function PFDTrackingTraining({ settings = {}, onComplete = () => {}, onEx
   const [phase, setPhase] = useState('briefing');
   const [activeLegIdx, setActiveLegIdx] = useState(0);
   const [outOfTol, setOutOfTol] = useState({ alt: false, hdg: false, spd: false });
+
+  const [briefingRemainingSec, setBriefingRemainingSec] = useState(
+    Math.ceil(BRIEFING_DURATION_MS / 1000)
+  );
   // Per-channel tolerance level for the BLUE pin color on each tape:
   //   'green'  → pin renders blue  (within green tolerance band — on target)
   //   'yellow' → pin renders yellow (within yellow band — drifting)
@@ -166,6 +171,28 @@ export function PFDTrackingTraining({ settings = {}, onComplete = () => {}, onEx
     if (!paused) runningRef.current = true;
   }, [phase, paused]);
 
+  // Auto-advance the briefing after BRIEFING_DURATION_MS. The 1-Hz
+  // interval drives the on-screen countdown; the setTimeout fires the
+  // actual dismissal. SPACE still skips early via BriefingModal →
+  // onDismiss → handleBriefingDismiss, which flips `phase` to 'flying'
+  // and triggers the cleanup below.
+  useEffect(() => {
+    if (phase !== 'briefing') return;
+    setBriefingRemainingSec(Math.ceil(BRIEFING_DURATION_MS / 1000));
+
+    const tick = setInterval(() => {
+      setBriefingRemainingSec((s) => (s > 0 ? s - 1 : 0));
+    }, 1000);
+    const dismiss = setTimeout(() => {
+      handleBriefingDismiss();
+    }, BRIEFING_DURATION_MS);
+
+    return () => {
+      clearInterval(tick);
+      clearTimeout(dismiss);
+    };
+  }, [phase, handleBriefingDismiss]);
+
   const currentLeg = activeLegs[activeLegIdx] ?? activeLegs[0];
   const mode = effectiveMode(currentLeg.mode);
   const isFlying = phase === 'flying';
@@ -211,6 +238,7 @@ export function PFDTrackingTraining({ settings = {}, onComplete = () => {}, onEx
             outOfTolerance={isFlying && altActive && outOfTol.alt}
             pinLevel={altActive ? pinLevel.alt : 'green'}
             label={t('altitude')}
+            followCurrent={true}
           />
 
           <div className="flex flex-col items-center" style={{ width: 720 }}>
@@ -228,6 +256,8 @@ export function PFDTrackingTraining({ settings = {}, onComplete = () => {}, onEx
               outOfTolerance={isFlying && hdgActive && outOfTol.hdg}
               pinLevel={hdgActive ? pinLevel.hdg : 'green'}
               label={t('heading')}
+              followCurrent={true}
+
             />
             <div className="mt-4 h-[80px]">
   <ToleranceMessage messages={messages} />
@@ -246,6 +276,8 @@ export function PFDTrackingTraining({ settings = {}, onComplete = () => {}, onEx
               outOfTolerance={isFlying && spdActive && outOfTol.spd}
               pinLevel={spdActive ? pinLevel.spd : 'green'}
               label={t('speed')}
+              followCurrent={true}
+
             />
             <div style={{ marginTop: 24 }}>
               <ThrottleSlider
@@ -263,7 +295,11 @@ export function PFDTrackingTraining({ settings = {}, onComplete = () => {}, onEx
         <BriefingModal
           title={locale === 'de' ? 'Nächster Abschnitt' : 'Next leg'}
           lines={currentLeg.briefing[locale] ?? currentLeg.briefing.en}
-          hint={locale === 'de' ? 'Leertaste zum Fortfahren' : 'Press SPACE to continue'}
+          hint={
+            locale === 'de'
+              ? `Beginnt in ${briefingRemainingSec}s · Leertaste zum Überspringen`
+              : `Starting in ${briefingRemainingSec}s · SPACE to skip`
+          }
           onDismiss={handleBriefingDismiss}
         />
       )}

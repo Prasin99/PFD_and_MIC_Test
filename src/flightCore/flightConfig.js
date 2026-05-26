@@ -203,6 +203,7 @@
  *
  *   Disturbance scaling unchanged — tester said joystick/control feel is good.
  */
+export const BRIEFING_DURATION_MS = 10000;
 
 export const difficultyPresets = {
   easy: {
@@ -243,8 +244,10 @@ export const difficultyPresets = {
     altDriftTau:      28,   hdgDriftTau:      25,   spdDriftTau:      21,
     // Irregular jumps unchanged from the previous recalibration:
     // ±75ft every 5–7s — distinct from hard's smooth drift, no longer violent.
-    altJumpRange:     75,   hdgJumpRange:     12,   spdJumpRange:      9,
-    jumpMinInterval:   5,   jumpMaxInterval:   7,
+    altJumpRange:     80,   hdgJumpRange:     18,   spdJumpRange:      10,
+    jumpMinInterval:   4,   jumpMaxInterval:   6,
+    altIrregularSmoothTau: 2.5,
+    hdgIrregularSmoothTau: 2.5,
   },
 };
 
@@ -268,9 +271,9 @@ export function buildFlightConfig(difficulty = 'medium', overrides = {}) {
       disturbanceSigma: d.altDisturbSigma,
       disturbanceTau: 20,
       tolerance: { green: 20, yellow: 50 },
-      tapeSpan: 200,
-      majorStep: 100,
-      minorStep: 10,
+      tapeSpan: 133,
+      majorStep: 50,    // was 100
+      minorStep: 5,
 
       consistentDriftSigma:     d.altDriftSigma,
       consistentDriftTau:       d.altDriftTau,
@@ -278,6 +281,7 @@ export function buildFlightConfig(difficulty = 'medium', overrides = {}) {
       irregularJumpRange:       d.altJumpRange,
       irregularMinInterval:     d.jumpMinInterval,
       irregularMaxInterval:     d.jumpMaxInterval,
+      irregularSmoothTau:       d.altIrregularSmoothTau ?? 0,
 
       ...overrides.altitude,
     },
@@ -299,6 +303,7 @@ export function buildFlightConfig(difficulty = 'medium', overrides = {}) {
       irregularJumpRange:       d.hdgJumpRange,
       irregularMinInterval:     d.jumpMinInterval,
       irregularMaxInterval:     d.jumpMaxInterval,
+      irregularSmoothTau:       d.hdgIrregularSmoothTau ?? 0,
 
       ...overrides.heading,
     },
@@ -313,8 +318,8 @@ export function buildFlightConfig(difficulty = 'medium', overrides = {}) {
       disturbanceSigma: d.spdDisturbSigma,
       disturbanceTau: 8,
       tolerance: { green: 3, yellow: 7 },
-      tapeSpan: 35,
-      majorStep: 5,
+      tapeSpan: 20,
+      majorStep: 25,
       minorStep: 1,
 
       consistentDriftSigma:     d.spdDriftSigma,

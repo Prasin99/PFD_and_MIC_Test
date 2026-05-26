@@ -1,32 +1,44 @@
 import React, { useMemo, useRef } from 'react';
 
 /**
- * Vertical altitude tape — STATIC scale, moving pins (SkyTest reference).
+ * SkyTest-style gradient: green at target → yellow at the green-tolerance
+ * boundary → orange at the yellow-tolerance boundary → red at the band
+ * edge (yellow * 1.2). Returns null past the edge so the band cleanly
+ * stops. Piecewise so the green-tolerance zone still reads "mostly
+ * green" rather than slipping into yellow halfway through.
+ */
+function toleranceColor(d, greenTol, yellowTol) {
+  const redEdge = yellowTol * 1.2;
+  if (d > redEdge) return null;
+  let h;
+  if (d <= greenTol) {
+    h = 120 - 40 * (d / greenTol);                              // 120 → 80
+  } else if (d <= yellowTol) {
+    h = 80  - 40 * ((d - greenTol)  / (yellowTol - greenTol));  // 80  → 40
+  } else {
+    h = 40  - 40 * ((d - yellowTol) / (redEdge - yellowTol));   // 40  → 0
+  }
+  return `hsl(${Math.max(0, h)}, 80%, 45%)`;
+}
+
+/**
+ * Vertical altitude tape.
  *
- *   - The tape and its scale are STATIC. Visible range is anchor ± tapeSpan,
- *     where anchor is captured from the first target value (= base target).
- *     Tick marks and labels never change position once the session starts.
- *   - The BLUE current-value pin moves up/down along the static scale to
- *     show actual altitude. Its color reflects the tolerance state:
- *       'green'  → blue  (in green band — on target)
- *       'yellow' → yellow (in yellow band)
- *       'red'    → red   (outside the yellow band)
- *   - The GREEN target ring (on the right edge of the tape) and the GREEN ▶
- *     arrow (on the left edge) move up/down to show where the target sits.
- *   - Tolerance bands (green / yellow / red caps) are anchored to the
- *     dynamic target, so they move with the green ring — they describe a
- *     property of the target, not of the scale.
- *   - When the value or the target leaves the visible window, an
- *     off-screen chevron with the numeric reading appears at the
- *     corresponding edge.
+ *   followCurrent === false (default; easy/medium/hard)
+ *     Static scale anchored to first target; yellow/green block tolerance
+ *     column; blue pin moves with altitude.
  *
- * `inactive` greys out the tape and freezes value at target.
+ *   followCurrent === true  (expert)
+ *     SkyTest model: scrolling scale anchored to current altitude;
+ *     tolerance is rendered by COLOURING each minor tick within
+ *     ±yellow*1.2 of the target via `toleranceColor()`; blue pin pinned
+ *     at screen-centre.
  */
 export function AltitudeTape({
   value,
   target,
-  tolerance,             // { green, yellow }
-  tapeSpan = 200,        // ±units visible in the viewport
+  tolerance,
+  tapeSpan = 200,
   majorStep = 100,
   minorStep = 10,
   width = 100,
@@ -34,48 +46,57 @@ export function AltitudeTape({
   label = 'ALTITUDE',
   inactive = false,
   outOfTolerance = false,
-  pinLevel = 'green',    // 'green' | 'yellow' | 'red'
+  pinLevel = 'green',
+  followCurrent = false,
 }) {
-  const scale = height / (2 * tapeSpan); // px per unit
+  const scale = height / (2 * tapeSpan);
 
-  // Anchor captured on first render — this is the base target value that
-  // the static scale centers on. All positions are computed relative to it.
-  const anchorRef = useRef(target);
-  const anchor = anchorRef.current;
+  const staticAnchorRef = useRef(target);
 
-  // Map an altitude value to viewport Y (0 = top edge, height = bottom edge).
-  const yAt = (V) => height / 2 + (anchor - V) * scale;
+  const center = inactive ? target : value;
+  const dynamicAnchor = Math.floor(center / minorStep) * minorStep;
 
-  // Render ticks only for the visible window — the scale is fixed.
-  const ticks = useMemo(() => {
+  const tickAnchor = followCurrent ? dynamicAnchor : staticAnchorRef.current;
+  const posCenter  = followCurrent ? center        : staticAnchorRef.current;
+
+  // Pin / off-screen indicators keep using the live posCenter.
+  const yAt = (V) => height / 2 + (posCenter - V) * scale;
+
+  // Everything inside the scroll container is positioned against the
+  // quantised tickAnchor — those positions are stable integers. The
+  // container is then translated by (posCenter - tickAnchor) * scale via
+  // translate3d, so smooth sub-pixel motion is handled by the GPU
+  // compositor and individual ticks stay locked on integer pixels.
+  const yAtFixed       = (V) => height / 2 + (tickAnchor - V) * scale;
+  const tickTranslateY = (posCenter - tickAnchor) * scale;
+  const targetYFixed   = yAtFixed(target);
+
+  const tickValues = useMemo(() => {
     const out = [];
-    const min = anchor - tapeSpan;
-    const max = anchor + tapeSpan;
+    const min = tickAnchor - tapeSpan;
+    const max = tickAnchor + tapeSpan;
     for (let v = Math.ceil(min / minorStep) * minorStep; v <= max; v += minorStep) {
       const isMajor = Math.abs(v % majorStep) < 1e-6;
-      out.push({ v, y: yAt(v), isMajor });
+      out.push({ v, isMajor });
     }
     return out;
-  }, [anchor, tapeSpan, minorStep, majorStep, scale]);
+  }, [tickAnchor, tapeSpan, minorStep, majorStep]);
 
-  // Tolerance bands anchored to the DYNAMIC target — they move with target.
+  // Static-mode tolerance band positions.
   const greenTop  = yAt(target + tolerance.green);
   const greenBot  = yAt(target - tolerance.green);
   const yellowTop = yAt(target + tolerance.yellow);
   const yellowBot = yAt(target - tolerance.yellow);
 
-  const targetY = yAt(target);
-  const valueY  = inactive ? height / 2 : yAt(value);
+  const valueY = followCurrent || inactive ? height / 2 : yAt(value);
 
-  // Off-screen detection — value or target outside the static window.
-  const valueAbove  = !inactive && value  > anchor + tapeSpan;
-  const valueBelow  = !inactive && value  < anchor - tapeSpan;
-  const targetAbove = !inactive && target > anchor + tapeSpan;
-  const targetBelow = !inactive && target < anchor - tapeSpan;
+  const valueAbove  = !inactive && value  > posCenter + tapeSpan;
+  const valueBelow  = !inactive && value  < posCenter - tapeSpan;
+  const targetAbove = !inactive && target > posCenter + tapeSpan;
+  const targetBelow = !inactive && target < posCenter - tapeSpan;
   const valueOff    = valueAbove  || valueBelow;
   const targetOff   = targetAbove || targetBelow;
 
-  // Blue pin color reflects tolerance state.
   const pinColor =
       pinLevel === 'red'    ? '#ef4444'
     : pinLevel === 'yellow' ? '#eab308'
@@ -94,76 +115,108 @@ export function AltitudeTape({
         className="relative bg-white border border-gray-300 overflow-hidden"
         style={{ width, height, opacity: inactive ? 0.45 : 1 }}
       >
-        {/* Tolerance band column (yellow under green, red caps) — moves with target */}
-        <div style={{
-          position: 'absolute', left: 30, width: 6,
-          top: yellowTop, height: yellowBot - yellowTop,
-          background: '#fde68a',
-        }} />
-        <div style={{
-          position: 'absolute', left: 30, width: 6,
-          top: greenTop, height: greenBot - greenTop,
-          background: '#86efac',
-        }} />
-        <div style={{
-          position: 'absolute', left: 30, width: 6,
-          top: yellowTop - 6, height: 6, background: '#ef4444',
-        }} />
-        <div style={{
-          position: 'absolute', left: 30, width: 6,
-          top: yellowBot, height: 6, background: '#ef4444',
-        }} />
+        {/* STATIC-MODE block tolerance column — hidden when followCurrent */}
+        {!followCurrent && (
+          <>
+            <div style={{
+              position: 'absolute', left: 30, width: 6,
+              top: yellowTop, height: yellowBot - yellowTop,
+              background: '#fde68a',
+            }} />
+            <div style={{
+              position: 'absolute', left: 30, width: 6,
+              top: greenTop, height: greenBot - greenTop,
+              background: '#86efac',
+            }} />
+            <div style={{
+              position: 'absolute', left: 30, width: 6,
+              top: yellowTop - 6, height: 6, background: '#ef4444',
+            }} />
+            <div style={{
+              position: 'absolute', left: 30, width: 6,
+              top: yellowBot, height: 6, background: '#ef4444',
+            }} />
+          </>
+        )}
 
-        {/* Static tick marks and labels */}
-        {ticks.map(({ v, y, isMajor }) => (
-          <React.Fragment key={v}>
+        {/* SCROLL CONTAINER — ticks, green ring, green ▶ arrow all live
+            in here. translate3d slides the whole group smoothly on the
+            GPU while each child stays on integer pixels. */}
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          transform: `translate3d(0, ${tickTranslateY}px, 0)`,
+          willChange: 'transform',
+        }}>
+          {tickValues.map(({ v, isMajor }, i) => {
+            const y = Math.round(yAtFixed(v));
+            const tolDist = followCurrent && !inactive ? Math.abs(v - target) : Infinity;
+            const color = toleranceColor(tolDist, tolerance.green, tolerance.yellow);
+            const isColored = color !== null;
+
+            // Adaptive colored-tick thickness so dense scales (small px/step)
+            // keep a visible gap between adjacent colored marks. ≥7 px/step
+            // → 3, ≥4 → 2, else 1.
+            const minorPx  = minorStep * scale;
+            const colThick = minorPx >= 7 ? 3 : minorPx >= 4 ? 2 : 1;
+
+            return (
+              <React.Fragment key={i}>
+                <div style={{
+                  position: 'absolute',
+                  // Colored marks match the underlying tick's natural length
+                  // (minor stays minor-length, major stays major-length).
+                  left:   isMajor ? 44              : 52,
+                  width:  isMajor ? width - 50      : width - 60,
+                  top:    y - (isColored ? Math.floor(colThick / 2) : 0),
+                  height: isColored ? colThick : 1,
+                  background: isColored ? color : '#374151',
+                  zIndex: isColored ? 1 : 0,
+                }} />
+                {isMajor && (
+                  <div style={{
+                    position: 'absolute',
+                    left: 0, top: y - 7,
+                    width: 28,
+                    fontSize: 11,
+                    fontFamily: 'ui-monospace, monospace',
+                    color: '#111827', textAlign: 'right',
+                    zIndex: 2,
+                  }}>
+                    {v}
+                  </div>
+                )}
+              </React.Fragment>
+            );
+          })}
+
+          {/* Green target ring — inside transform so it scrolls with scale */}
+          {!targetOff && (
             <div style={{
               position: 'absolute',
-              left: isMajor ? 44 : 52,
-              width: isMajor ? width - 50 : width - 60,
-              top: y - 0.5, height: 1,
-              background: '#374151',
+              left: width - 30,
+              top:  Math.round(targetYFixed) - 9,
+              width: 18, height: 18,
+              border: '2.5px solid #16a34a',
+              borderRadius: '50%',
+              zIndex: 3,
             }} />
-            {isMajor && (
-              <div style={{
-                position: 'absolute',
-                left: 0, top: y - 7,
-                width: 28,
-                fontSize: 11,
-                fontFamily: 'ui-monospace, monospace',
-                color: '#111827', textAlign: 'right',
-              }}>
-                {v}
-              </div>
-            )}
-          </React.Fragment>
-        ))}
+          )}
 
-        {/* Green target ring on the right edge — moves with target */}
-        {!targetOff && (
-          <div style={{
-            position: 'absolute',
-            left: width - 30, top: targetY - 9,
-            width: 18, height: 18,
-            border: '2.5px solid #16a34a',
-            borderRadius: '50%',
-            zIndex: 2,
-          }} />
-        )}
+          {/* Green ▶ arrow on the LEFT edge — also inside transform */}
+          {!targetOff && (
+            <div style={{
+              position: 'absolute',
+              top: Math.round(targetYFixed) - 7, left: 0,
+              color: '#16a34a', fontSize: 14, zIndex: 3,
+              lineHeight: '14px', fontWeight: 700,
+            }}>
+              ▶
+            </div>
+          )}
+        </div>
 
-        {/* Green target arrow on the LEFT edge — co-located with target ring */}
-        {!targetOff && (
-          <div style={{
-            position: 'absolute',
-            top: targetY - 7, left: 0,
-            color: '#16a34a', fontSize: 14, zIndex: 3,
-            lineHeight: '14px', fontWeight: 700,
-          }}>
-            ▶
-          </div>
-        )}
-
-        {/* BLUE current-value pin — moves with value, color = tolerance state */}
+        {/* BLUE current-value pin — OUTSIDE transform, stays at centre */}
         {!valueOff && (
           <div style={{
             position: 'absolute',
@@ -174,7 +227,7 @@ export function AltitudeTape({
           }} />
         )}
 
-        {/* Off-screen TARGET indicator (right side, same side as target ring) */}
+        {/* Off-screen TARGET indicator */}
         {targetOff && (
           <div
             style={{
@@ -197,7 +250,7 @@ export function AltitudeTape({
           </div>
         )}
 
-        {/* Off-screen VALUE indicator (left side, color-coded same as pin) */}
+        {/* Off-screen VALUE indicator (static mode only) */}
         {valueOff && (
           <div
             style={{
@@ -227,7 +280,6 @@ export function AltitudeTape({
         )}
       </div>
 
-      {/* Target value chip below */}
       <div
         className="absolute text-center text-xs font-mono text-green-300 bg-gray-800 border border-gray-700"
         style={{ left: '50%', transform: 'translateX(-50%)', bottom: 0, padding: '1px 8px', minWidth: 50 }}

@@ -41,6 +41,11 @@ export function createFlightState(cfg) {
     drftAltSmoothed: 0, drftHdgSmoothed: 0, drftSpdSmoothed: 0,
     // Countdown timers for irregular-jump mode.
     nextJumpAlt: 0, nextJumpHdg: 0, nextJumpSpd: 0,
+     irrSetAlt: 0, irrSetHdg: 0, irrSetSpd: 0,
+    // First-order low-pass of the setpoint above. With irregularSmoothTau
+    // === 0 (every level except expert altitude/heading) this just copies
+    // the setpoint and the visible behaviour is identical to a snap.
+    irrSmAlt:  0, irrSmHdg:  0, irrSmSpd:  0,
   };
 }
 
@@ -105,24 +110,34 @@ export function stepFlight(state, inputs, mode, cfg, dt, rng) {
 
 function updateTarget(channelName, modeStr, currentTarget, ccfg, state, dt, rng) {
   const baseTarget = ccfg.target;
-  const driftKey  = channelName === 'altitude' ? 'drftAlt'        : channelName === 'heading' ? 'drftHdg'        : 'drftSpd';
-  const smoothKey = channelName === 'altitude' ? 'drftAltSmoothed': channelName === 'heading' ? 'drftHdgSmoothed': 'drftSpdSmoothed';
-  const jumpKey   = channelName === 'altitude' ? 'nextJumpAlt'    : channelName === 'heading' ? 'nextJumpHdg'    : 'nextJumpSpd';
+  const driftKey  = channelName === 'altitude' ? 'drftAlt'         : channelName === 'heading' ? 'drftHdg'         : 'drftSpd';
+  const smoothKey = channelName === 'altitude' ? 'drftAltSmoothed' : channelName === 'heading' ? 'drftHdgSmoothed' : 'drftSpdSmoothed';
+  const jumpKey   = channelName === 'altitude' ? 'nextJumpAlt'     : channelName === 'heading' ? 'nextJumpHdg'     : 'nextJumpSpd';
+  const irrSetKey = channelName === 'altitude' ? 'irrSetAlt'       : channelName === 'heading' ? 'irrSetHdg'       : 'irrSetSpd';
+  const irrSmKey  = channelName === 'altitude' ? 'irrSmAlt'        : channelName === 'heading' ? 'irrSmHdg'        : 'irrSmSpd';
 
   switch (modeStr) {
     case 'maintain':
     case 'inactive':
-      // Channel is at base — wipe all drift / jump state so the next time
-      // the channel becomes active it starts from a clean slate.
+      // Channel parked at base — wipe every drift / jump / slew slot so
+      // the next active leg of any mode starts from a clean slate.
       state[driftKey]  = 0;
       state[smoothKey] = 0;
+      state[irrSetKey] = 0;
+      state[irrSmKey]  = 0;
       state[jumpKey]   = 0;
       return baseTarget;
 
     case 'consistent': {
+      // OU drift active; irregular slots held at 0 so a later irregular
+      // leg starts from base instead of inheriting a stale setpoint.
+      state[irrSetKey] = 0;
+      state[irrSmKey]  = 0;
+      state[jumpKey]   = 0;
+
       // 1. Raw OU drift (correlated random walk around 0 with std=sigma).
       state[driftKey] = ouStep(state[driftKey], ccfg.consistentDriftSigma, ccfg.consistentDriftTau, dt, rng);
-      // 2. Low-pass filter to strip the high-frequency per-step jitter.
+      // 2. Low-pass to strip the high-frequency per-step jitter.
       const smoothTau = ccfg.consistentDriftSmoothTau ?? 1.5;
       state[smoothKey] += (state[driftKey] - state[smoothKey]) * (dt / smoothTau);
       let next = baseTarget + state[smoothKey];
@@ -131,19 +146,35 @@ function updateTarget(channelName, modeStr, currentTarget, ccfg, state, dt, rng)
     }
 
     case 'irregular': {
-      // Irregular doesn't use the OU chain — wipe it so a later consistent
-      // leg starts clean.
+      // Irregular active; OU slots held at 0 so a later consistent leg
+      // starts clean. (This preserves the old behaviour exactly.)
       state[driftKey]  = 0;
       state[smoothKey] = 0;
+
+      // Tick the jump timer. On expiry sample a fresh offset into the
+      // SETPOINT slot. The smoothed slew below either copies it (snap)
+      // or eases toward it (expert altitude/heading).
       state[jumpKey] -= dt;
       if (state[jumpKey] <= 0) {
-        const offset = (rng() * 2 - 1) * ccfg.irregularJumpRange;
-        let next = baseTarget + offset;
-        if (channelName === 'heading') next = wrap360(next);
-        state[jumpKey] = ccfg.irregularMinInterval + rng() * (ccfg.irregularMaxInterval - ccfg.irregularMinInterval);
-        return next;
+        state[irrSetKey] = (rng() * 2 - 1) * ccfg.irregularJumpRange;
+        state[jumpKey] = ccfg.irregularMinInterval
+          + rng() * (ccfg.irregularMaxInterval - ccfg.irregularMinInterval);
       }
-      return currentTarget;
+      // First-order LP slew of the setpoint.
+      //   τ === 0 → direct copy → bit-identical to the old snap.
+      //   τ  > 0 → exponential approach → smooth slew.
+      // For heading the LP runs on the *offset* (always bounded to
+      // ±irregularJumpRange = ±12° at expert) so plain linear filtering
+      // is correct; the wrap is applied at the end after adding to base.
+      const smoothTau = ccfg.irregularSmoothTau ?? 0;
+      if (smoothTau > 0) {
+        state[irrSmKey] += (state[irrSetKey] - state[irrSmKey]) * (dt / smoothTau);
+      } else {
+        state[irrSmKey] = state[irrSetKey];
+      }
+      let next = baseTarget + state[irrSmKey];
+      if (channelName === 'heading') next = wrap360(next);
+      return next;
     }
 
     default:

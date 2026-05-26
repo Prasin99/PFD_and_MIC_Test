@@ -2,18 +2,38 @@ import React, { useMemo, useRef } from 'react';
 import { angularDiff } from '../flightDynamics.js';
 
 /**
- * Horizontal heading tape — STATIC scale, moving pins.
+ * SkyTest-style gradient: green at target → yellow at the green-tolerance
+ * boundary → orange at the yellow-tolerance boundary → red at the band
+ * edge (yellow * 1.2). Returns null past the edge so the band cleanly
+ * stops. Piecewise so the green-tolerance zone still reads "mostly
+ * green" rather than slipping into yellow halfway through.
+ */
+function toleranceColor(d, greenTol, yellowTol) {
+  const redEdge = yellowTol * 1.2;
+  if (d > redEdge) return null;
+  let h;
+  if (d <= greenTol) {
+    h = 120 - 40 * (d / greenTol);                              // 120 → 80
+  } else if (d <= yellowTol) {
+    h = 80  - 40 * ((d - greenTol)  / (yellowTol - greenTol));  // 80  → 40
+  } else {
+    h = 40  - 40 * ((d - yellowTol) / (redEdge - yellowTol));   // 40  → 0
+  }
+  return `hsl(${Math.max(0, h)}, 80%, 45%)`;
+}
+
+/**
+ * Horizontal heading tape.
  *
- * Same architecture as the vertical tapes but on the X axis, with
- * circular-difference math to handle the 359° → 0° wrap.
+ *   followCurrent === false (default; easy/medium/hard)
+ *     Static scale anchored to first target; yellow/green block tolerance
+ *     bands; blue pin moves with current heading.
  *
- *   - Scale is FIXED at anchor ± tapeSpan degrees. Tick labels stay put.
- *     Around north the labels read e.g. … 355, 0, 5, 10 … even though the
- *     internal coordinate is signed.
- *   - BLUE pin moves left/right with current heading; color = tolerance state.
- *   - GREEN target ring (inside tape) + ▲ arrow (below tape) move with target.
- *   - Off-screen chevrons (◀ / ▶) appear on the edge where the value or
- *     target lies when it's outside the static window.
+ *   followCurrent === true  (expert)
+ *     SkyTest model: scrolling scale anchored to current heading; the
+ *     tolerance band is rendered by COLOURING each minor tick within
+ *     ±yellow*1.2 of the target via `toleranceColor()`; blue pin is
+ *     pinned at screen-centre.
  */
 export function HeadingTape({
   value,
@@ -28,49 +48,58 @@ export function HeadingTape({
   inactive = false,
   outOfTolerance = false,
   pinLevel = 'green',
+  followCurrent = false,
 }) {
   const scale = width / (2 * tapeSpan);
 
-  // Anchor = first target = base heading (e.g. 0). Static window centers here.
-  const anchorRef = useRef(target);
-  const anchor = anchorRef.current;
+  // Static-mode anchor (captured once from the first target).
+  const staticAnchorRef = useRef(target);
 
-  // Map a heading to viewport X via signed circular delta from anchor.
-  const xAt = (deltaDeg) => width / 2 + deltaDeg * scale;
+  // Scroll-mode anchor: follows current value, quantized to minorStep
+  // so the tick list only re-renders at degree crossings.
+  const center = inactive ? target : value;
+  const dynamicAnchor = Math.floor(center / minorStep) * minorStep;
 
-  const valueDelta  = inactive ? 0 : angularDiff(value,  anchor);
-  const targetDelta = inactive ? 0 : angularDiff(target, anchor);
+  const tickAnchor = followCurrent ? dynamicAnchor : staticAnchorRef.current;
+  const posCenter  = followCurrent ? center        : staticAnchorRef.current;
 
-  const valueX  = xAt(valueDelta);
-  const targetX = xAt(targetDelta);
+  const xAt = (absHdg) => width / 2 + angularDiff(absHdg, posCenter) * scale;
+
+  // Fixed-anchor positioning for elements INSIDE the scroll container.
+  // Each tick already carries its signed delta `d` from tickAnchor (built
+  // in the useMemo below), so xAtFixed(d) is a stable integer-pixel x.
+  // The container is then translated by (tickAnchor - posCenter) * scale
+  // via translate3d so motion is handled by the GPU compositor.
+  const xAtFixed       = (d) => width / 2 + d * scale;
+  const tickTranslateX = (tickAnchor - posCenter) * scale;
+  const targetD        = angularDiff(target, tickAnchor);
+
+  const valueDelta  = inactive ? 0 : angularDiff(value,  posCenter);
+  const targetDelta = inactive ? 0 : angularDiff(target, posCenter);
+
+  const valueX  = followCurrent ? width / 2 : xAt(value);
+  const targetX = xAt(target);
 
   const ticks = useMemo(() => {
     const out = [];
-    // Iterate in signed delta-from-anchor space so positions are stable.
     const min = -tapeSpan;
     const max =  tapeSpan;
     const first = Math.ceil(min / minorStep) * minorStep;
     for (let d = first; d <= max; d += minorStep) {
-      // Label is the absolute heading (anchor + d) wrapped to [0, 360).
-      const absHdg  = ((anchor + d) % 360 + 360) % 360;
+      const absHdg = ((tickAnchor + d) % 360 + 360) % 360;
       const isMajor = Math.abs(absHdg % majorStep) < 1e-6
                    || Math.abs((absHdg % majorStep) - majorStep) < 1e-6;
-      out.push({
-        labelText: absHdg,
-        x: xAt(d),
-        isMajor,
-      });
+      out.push({ labelText: absHdg, absHdg, d, isMajor });
     }
     return out;
-  }, [anchor, tapeSpan, minorStep, majorStep, scale]);
+  }, [tickAnchor, tapeSpan, minorStep, majorStep]);
 
-  // Tolerance bands relative to target's screen position.
+  // Static-mode tolerance band positions (unused when followCurrent).
   const greenLeft   = targetX - tolerance.green  * scale;
   const greenRight  = targetX + tolerance.green  * scale;
   const yellowLeft  = targetX - tolerance.yellow * scale;
   const yellowRight = targetX + tolerance.yellow * scale;
 
-  // Off-screen detection.
   const valueRight  = !inactive && valueDelta  >  tapeSpan;
   const valueLeft   = !inactive && valueDelta  < -tapeSpan;
   const targetRight = !inactive && targetDelta >  tapeSpan;
@@ -101,60 +130,87 @@ export function HeadingTape({
           {String(Math.round(target)).padStart(3, '0')}
         </div>
 
-        {/* Tolerance bands — move with target's screen X */}
-        <div style={{
-          position: 'absolute', top: 6, height: 6,
-          left: yellowLeft, width: yellowRight - yellowLeft, background: '#fde68a',
-        }} />
-        <div style={{
-          position: 'absolute', top: 6, height: 6,
-          left: greenLeft, width: greenRight - greenLeft, background: '#86efac',
-        }} />
-        <div style={{
-          position: 'absolute', top: 6, height: 6,
-          left: yellowLeft - 6, width: 6, background: '#ef4444',
-        }} />
-        <div style={{
-          position: 'absolute', top: 6, height: 6,
-          left: yellowRight, width: 6, background: '#ef4444',
-        }} />
-
-        {/* Static tick marks and labels */}
-        {ticks.map(({ labelText, x, isMajor }, i) => (
-          <React.Fragment key={i}>
+        {/* STATIC-MODE block tolerance bands — hidden when followCurrent */}
+        {!followCurrent && (
+          <>
             <div style={{
-              position: 'absolute',
-              top: isMajor ? 16 : 22,
-              height: isMajor ? height - 32 : height - 44,
-              left: x - 0.5, width: 1, background: '#374151',
+              position: 'absolute', top: 6, height: 6,
+              left: yellowLeft, width: yellowRight - yellowLeft, background: '#fde68a',
             }} />
-            {isMajor && (
-              <div style={{
-                position: 'absolute',
-                bottom: 4, left: x - 14, width: 28,
-                fontSize: 11,
-                fontFamily: 'ui-monospace, monospace',
-                color: '#111827', textAlign: 'center',
-              }}>
-                {labelText}
-              </div>
-            )}
-          </React.Fragment>
-        ))}
-
-        {/* Green target ring inside the tape — moves with target */}
-        {!targetOff && (
-          <div style={{
-            position: 'absolute',
-            top: 2, left: targetX - 9,
-            width: 18, height: 18,
-            border: '2.5px solid #16a34a',
-            borderRadius: '50%',
-            zIndex: 2,
-          }} />
+            <div style={{
+              position: 'absolute', top: 6, height: 6,
+              left: greenLeft, width: greenRight - greenLeft, background: '#86efac',
+            }} />
+            <div style={{
+              position: 'absolute', top: 6, height: 6,
+              left: yellowLeft - 6, width: 6, background: '#ef4444',
+            }} />
+            <div style={{
+              position: 'absolute', top: 6, height: 6,
+              left: yellowRight, width: 6, background: '#ef4444',
+            }} />
+          </>
         )}
 
-        {/* BLUE current-value pin — moves with value, color = tolerance */}
+        {/* SCROLL CONTAINER — ticks and the on-tape target ring live here.
+            translate3d slides the whole group smoothly on the GPU while
+            each child stays on integer pixels. */}
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          transform: `translate3d(${tickTranslateX}px, 0, 0)`,
+          willChange: 'transform',
+        }}>
+          {ticks.map(({ labelText, absHdg, d, isMajor }, i) => {
+            const x = Math.round(xAtFixed(d));
+            const tolDist = followCurrent && !inactive
+              ? Math.abs(angularDiff(absHdg, target))
+              : Infinity;
+            const color = toleranceColor(tolDist, tolerance.green, tolerance.yellow);
+            const isColored = color !== null;
+
+            return (
+              <React.Fragment key={i}>
+                <div style={{
+                  position: 'absolute',
+                  top:    isMajor ? 16          : 22,
+                  height: isMajor ? height - 32 : height - 44,
+                  left:   x - (isColored ? 1 : 0),
+                  width:  isColored ? 3 : 1,
+                  background: isColored ? color : '#374151',
+                  zIndex: isColored ? 1 : 0,
+                }} />
+                {isMajor && (
+                  <div style={{
+                    position: 'absolute',
+                    bottom: 4, left: x - 14, width: 28,
+                    fontSize: 11,
+                    fontFamily: 'ui-monospace, monospace',
+                    color: '#111827', textAlign: 'center',
+                    zIndex: 2,
+                  }}>
+                    {labelText}
+                  </div>
+                )}
+              </React.Fragment>
+            );
+          })}
+
+          {/* Green target ring — inside transform so it scrolls with scale */}
+          {!targetOff && (
+            <div style={{
+              position: 'absolute',
+              top: 2,
+              left: Math.round(xAtFixed(targetD)) - 9,
+              width: 18, height: 18,
+              border: '2.5px solid #16a34a',
+              borderRadius: '50%',
+              zIndex: 3,
+            }} />
+          )}
+        </div>
+
+        {/* BLUE current-value pin — outside transform, stays at centre */}
         {!valueOff && (
           <div style={{
             position: 'absolute',
@@ -186,7 +242,7 @@ export function HeadingTape({
           </div>
         )}
 
-        {/* Off-screen VALUE indicator — opposite-color chevron */}
+        {/* Off-screen VALUE indicator (static mode only) */}
         {valueOff && (
           <div
             style={{
@@ -216,7 +272,11 @@ export function HeadingTape({
         )}
       </div>
 
-      {/* Green target arrow UNDER the tape — co-located with target ring */}
+      {/* Green ▲ arrow under the tape — kept as a single dynamic-position
+          element (uses live targetX). It's only one node moving, so no
+          transform optimisation is needed; this keeps it positioned
+          relative to the outer wrapper rather than the inner overflow
+          container, which is what the original layout assumed. */}
       {!targetOff && (
         <div
           className="absolute"
