@@ -66,7 +66,9 @@ export function stepFlight(state, inputs, mode, cfg, dt, rng) {
     state.vSpeed = 0;
     state.altitude = state.currentTargetAltitude;
   } else {
-    const vSpeedCmd = cfg.altitude.gainPitch * clampPM1(inputs.pitch) + state.distVSpeed;
+    //const vSpeedCmd = cfg.altitude.gainPitch * clampPM1(inputs.pitch) + state.distVSpeed;
+    const vSpeedCmd = cfg.altitude.gainPitch * clampPM1(inputs.pitch) + state.distVSpeed + (cfg.altitude.disturbanceBias ?? 0);
+
     state.vSpeed += (vSpeedCmd - state.vSpeed) * (dt / cfg.altitude.rateLag);
     state.altitude += state.vSpeed * dt;
   }
@@ -75,7 +77,9 @@ export function stepFlight(state, inputs, mode, cfg, dt, rng) {
     state.headingRate = 0;
     state.heading = state.currentTargetHeading;
   } else {
-    const hdgRateCmd = cfg.heading.gainRoll * clampPM1(inputs.roll) + state.distHdgRate;
+    //const hdgRateCmd = cfg.heading.gainRoll * clampPM1(inputs.roll) + state.distHdgRate;
+    const hdgRateCmd = cfg.heading.gainRoll * clampPM1(inputs.roll) + state.distHdgRate + (cfg.heading.disturbanceBias ?? 0);
+
     state.headingRate += (hdgRateCmd - state.headingRate) * (dt / cfg.heading.rateLag);
     state.heading = wrap360(state.heading + state.headingRate * dt);
   }
@@ -103,7 +107,9 @@ export function stepFlight(state, inputs, mode, cfg, dt, rng) {
   const eq = baseEq - altCoupling;
 
   // 3. Disturbance + first-order lag toward equilibrium.
-  const speedCmd = eq + state.distSpeed;
+  //const speedCmd = eq + state.distSpeed;
+  const speedCmd = eq + state.distSpeed + (cfg.speed.disturbanceBias ?? 0);
+
   state.speed += (speedCmd - state.speed) * (dt / cfg.speed.rateLag);
 }
 }
