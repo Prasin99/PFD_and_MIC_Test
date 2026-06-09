@@ -192,12 +192,17 @@ export default function App() {
     setModule(null); setPhase('setup'); setSettings(null); setResult(null);
   }, []);
 
+  // Return to the module picker (used by the Back button on setup screens)
+  const handleBackToMenu = useCallback(() => {
+    setModule(null); setPhase('setup'); setSettings(null); setResult(null);
+  }, []);
+
   // ── Landing: module picker ──
   if (!module) return <ModulePicker onSelect={handleSelectModule} />;
 
   // ── PFD flow (unchanged) ──
   if (module === 'pfd') {
-    if (phase === 'setup')    return <PFDTrackingSetup onStart={handleStart} defaults={{ durationMin: 4 }} />;
+    if (phase === 'setup')    return <PFDTrackingSetup onStart={handleStart} onBack={handleBackToMenu} defaults={{ durationMin: 4 }} />;
     if (phase === 'training') return (
       <div className="w-screen h-screen overflow-hidden">
         <PFDTrackingTraining settings={settings} onComplete={handleComplete} onExit={handleExit} />
@@ -208,7 +213,7 @@ export default function App() {
 
   // ── MIC flow ──
   if (module === 'mic') {
-    if (phase === 'setup')    return <MICSetup onStart={handleStart} />;
+    if (phase === 'setup')    return <MICSetup onStart={handleStart} onBack={handleBackToMenu} />;
     if (phase === 'training') return (
       <div className="w-screen h-screen overflow-hidden">
         <MICTraining settings={settings} onComplete={handleComplete} onExit={handleExit} />
@@ -225,7 +230,7 @@ function ModulePicker({ onSelect }) {
     <div className="min-h-screen bg-slate-900 text-white flex flex-col items-center justify-center gap-8 p-8">
       <header className="text-center">
         <h1 className="text-4xl font-bold">Flight-Core Foundation</h1>
-        {/* <p className="text-slate-400 mt-2">Choose a test module</p> */}
+        <p className="text-slate-400 mt-2">Choose a test module</p>
       </header>
       <div className="grid grid-cols-1 gap-4 max-w-md w-full">
         <ModuleCard

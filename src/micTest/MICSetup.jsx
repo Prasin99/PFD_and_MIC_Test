@@ -7,8 +7,9 @@ import { MIC_LEVELS, MIC_DEFAULT_LEVEL_ID } from './legs';
  * include, set a duration, then Start.
  *
  * Calls onStart(config) when the user confirms.
+ * Calls onBack() to return to the module picker.
  */
-export function MICSetup({ onStart }) {
+export function MICSetup({ onStart, onBack }) {
   const [levelId, setLevelId] = useState(MIC_DEFAULT_LEVEL_ID);
   const [activeInstruments, setActiveInstruments] = useState({
     heading: true,
@@ -53,6 +54,16 @@ export function MICSetup({ onStart }) {
   return (
     <div className="min-h-screen bg-slate-900 text-white p-8 flex justify-center">
       <div className="max-w-3xl w-full space-y-8">
+        {onBack && (
+          <button
+            onClick={onBack}
+            className="inline-flex items-center gap-2 text-sm text-slate-300
+                       hover:text-white transition"
+          >
+            <span aria-hidden="true">←</span> Back to menu
+          </button>
+        )}
+
         <header>
           <h1 className="text-3xl font-bold">
             Monitoring and Instrument Coordination
