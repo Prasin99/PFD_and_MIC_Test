@@ -230,7 +230,7 @@ function ModulePicker({ onSelect }) {
     <div className="min-h-screen bg-slate-900 text-white flex flex-col items-center justify-center gap-8 p-8">
       <header className="text-center">
         <h1 className="text-4xl font-bold">Flight-Core Foundation</h1>
-        <p className="text-slate-400 mt-2">Choose a test module</p>
+        {/* <p className="text-slate-400 mt-2">Choose a test module</p> */}
       </header>
       <div className="grid grid-cols-1 gap-4 max-w-md w-full">
         <ModuleCard
