@@ -86,10 +86,20 @@ export function HeadingTape({
     const max =  tapeSpan;
     const first = Math.ceil(min / minorStep) * minorStep;
     for (let d = first; d <= max; d += minorStep) {
-      const absHdg = ((tickAnchor + d) % 360 + 360) % 360;
-      const isMajor = Math.abs(absHdg % majorStep) < 1e-6
-                   || Math.abs((absHdg % majorStep) - majorStep) < 1e-6;
-      out.push({ labelText: absHdg, absHdg, d, isMajor });
+      // const absHdg = ((tickAnchor + d) % 360 + 360) % 360;
+      // const isMajor = Math.abs(absHdg % majorStep) < 1e-6
+      //              || Math.abs((absHdg % majorStep) - majorStep) < 1e-6;
+      // out.push({ labelText: absHdg, absHdg, d, isMajor });
+      // AFTER:
+const rawHdg = tickAnchor + d;
+const absHdg = ((rawHdg % 360) + 360) % 360;
+const raw360 = ((Math.round(rawHdg) % 360) + 360) % 360;
+//const labelText = raw360;  // 0–359; we skip 355 in render
+const labelText = raw360 === 355 ? 0 : raw360;
+
+const isMajor = Math.abs(raw360 % majorStep) < 1e-6
+       || Math.abs((raw360 % majorStep) - majorStep) < 1e-6;
+out.push({ labelText, absHdg, d, isMajor });
     }
     return out;
   }, [tickAnchor, tapeSpan, minorStep, majorStep]);
@@ -180,7 +190,7 @@ export function HeadingTape({
                   background: isColored ? color : '#374151',
                   zIndex: isColored ? 1 : 0,
                 }} />
-                {isMajor && (
+{isMajor && (
                   <div style={{
                     position: 'absolute',
                     bottom: 4, left: x - 14, width: 28,
